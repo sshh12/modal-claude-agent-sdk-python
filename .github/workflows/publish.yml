@@ -121,8 +121,13 @@ jobs:
 
         git checkout -b "$BRANCH_NAME"
 
+        # Check if there are changes to commit
         git add pyproject.toml src/modal_agents_sdk/__init__.py
-        git commit -m "chore: release v${{ env.VERSION }}"
+        if git diff --staged --quiet; then
+          echo "No version changes needed (version already matches)"
+        else
+          git commit -m "chore: release v${{ env.VERSION }}"
+        fi
 
     - name: Push branch and create PR
       env:

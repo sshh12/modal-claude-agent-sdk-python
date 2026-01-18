@@ -6,7 +6,9 @@ from modal_agents_sdk import (
     AgentExecutionError,
     CLINotInstalledError,
     ImageBuildError,
+    MissingAPIKeyError,
     ModalAgentError,
+    NetworkConfigurationError,
     ResourceError,
     SandboxCreationError,
     SandboxTerminatedError,
@@ -29,6 +31,8 @@ class TestErrorHierarchy:
             ResourceError,
             CLINotInstalledError,
             AgentExecutionError,
+            NetworkConfigurationError,
+            MissingAPIKeyError,
         ]
 
         for error_class in error_classes:
@@ -95,6 +99,18 @@ class TestErrorHierarchy:
         error = AgentExecutionError("Unknown failure")
         assert str(error) == "Unknown failure"
         assert error.exit_code is None
+
+    def test_network_configuration_error(self):
+        """Test NetworkConfigurationError."""
+        error = NetworkConfigurationError("block_network not supported")
+        assert str(error) == "block_network not supported"
+        assert isinstance(error, ModalAgentError)
+
+    def test_missing_api_key_error(self):
+        """Test MissingAPIKeyError."""
+        error = MissingAPIKeyError("No API key configured")
+        assert str(error) == "No API key configured"
+        assert isinstance(error, ModalAgentError)
 
 
 class TestErrorCatching:

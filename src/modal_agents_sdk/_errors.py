@@ -63,3 +63,9 @@ class NetworkConfigurationError(ModalAgentError):
     """Invalid network configuration for agent execution."""
 
     pass
+
+
+class MissingAPIKeyError(ModalAgentError):
+    """Anthropic API key is not configured."""
+
+    pass

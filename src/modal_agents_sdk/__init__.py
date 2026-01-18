@@ -26,6 +26,7 @@ from ._errors import (
     AgentExecutionError,
     CLINotInstalledError,
     ImageBuildError,
+    MissingAPIKeyError,
     ModalAgentError,
     NetworkConfigurationError,
     ResourceError,
@@ -71,6 +72,7 @@ __all__ = [
     "CLINotInstalledError",
     "AgentExecutionError",
     "NetworkConfigurationError",
+    "MissingAPIKeyError",
     # Types (re-exported from claude-agent-sdk)
     "Message",
     "AssistantMessage",

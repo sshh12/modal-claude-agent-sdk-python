@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import warnings
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
@@ -12,6 +14,7 @@ from ._constants import RUNNER_SCRIPT
 from ._errors import (
     AgentExecutionError,
     CLINotInstalledError,
+    MissingAPIKeyError,
     NetworkConfigurationError,
     SandboxCreationError,
     SandboxTerminatedError,
@@ -36,6 +39,7 @@ class SandboxManager:
         self.options = options
         self._sandbox: modal.Sandbox | None = None
         self._app: modal.App | None = None
+        self._using_local_api_key: bool = False
 
     def _get_image(self) -> modal.Image:
         """Get the Modal image to use for the sandbox.
@@ -67,6 +71,57 @@ class SandboxManager:
                 "  )"
             )
 
+    def _validate_api_key_config(self) -> str | None:
+        """Validate API key configuration and return local key if needed.
+
+        Returns:
+            The local ANTHROPIC_API_KEY if it should be used, None otherwise.
+
+        Raises:
+            MissingAPIKeyError: If no API key is configured anywhere.
+        """
+        # Check if secrets are provided
+        has_secrets = bool(self.options.secrets)
+
+        # Check if ANTHROPIC_API_KEY is explicitly set in env options
+        has_env_key = self.options.env and "ANTHROPIC_API_KEY" in self.options.env
+
+        # If secrets or explicit env key provided, assume user knows what they're doing
+        if has_secrets or has_env_key:
+            return None
+
+        # Check for local environment variable
+        local_api_key = os.environ.get("ANTHROPIC_API_KEY")
+
+        if local_api_key:
+            # Warn user and suggest creating a proper Modal secret
+            warnings.warn(
+                "\n"
+                "Using ANTHROPIC_API_KEY from local environment.\n"
+                "For production use, create a Modal secret instead:\n\n"
+                "  modal secret create anthropic-key ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY\n\n"
+                "Then pass it to ModalAgentOptions:\n\n"
+                "  options = ModalAgentOptions(\n"
+                '      secrets=[modal.Secret.from_name("anthropic-key")],\n'
+                "  )\n",
+                UserWarning,
+                stacklevel=4,
+            )
+            self._using_local_api_key = True
+            return local_api_key
+
+        # No API key found anywhere
+        raise MissingAPIKeyError(
+            "No Anthropic API key configured.\n\n"
+            "Option 1: Create a Modal secret (recommended):\n"
+            "  modal secret create anthropic-key ANTHROPIC_API_KEY=sk-ant-...\n\n"
+            "  options = ModalAgentOptions(\n"
+            '      secrets=[modal.Secret.from_name("anthropic-key")],\n'
+            "  )\n\n"
+            "Option 2: Set the environment variable locally:\n"
+            "  export ANTHROPIC_API_KEY=sk-ant-..."
+        )
+
     def _build_sandbox_kwargs(self) -> dict[str, Any]:
         """Build keyword arguments for sandbox creation.
 
@@ -75,9 +130,11 @@ class SandboxManager:
 
         Raises:
             NetworkConfigurationError: If network config is incompatible.
+            MissingAPIKeyError: If no API key is configured.
         """
-        # Validate network configuration first
+        # Validate configurations
         self._validate_network_config()
+        local_api_key = self._validate_api_key_config()
 
         kwargs: dict[str, Any] = {
             "image": self._get_image(),
@@ -107,10 +164,16 @@ class SandboxManager:
         if self.options.secrets:
             kwargs["secrets"] = self.options.secrets
 
-        # Environment variables
+        # Environment variables - merge local API key if needed
+        env_vars: dict[str, str] = {}
         if self.options.env:
+            env_vars.update(self.options.env)
+        if local_api_key:
+            env_vars["ANTHROPIC_API_KEY"] = local_api_key
+
+        if env_vars:
             kwargs["encrypted_ports"] = []  # Required for env to work
-            kwargs["environment"] = self.options.env
+            kwargs["environment"] = env_vars
 
         # Network restrictions
         if self.options.block_network:
