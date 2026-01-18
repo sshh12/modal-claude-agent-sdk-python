@@ -4,6 +4,22 @@
 
 Run [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) agents in [Modal](https://modal.com) sandboxes.
 
+This package wraps the Claude Agent SDK to execute AI agents in secure, scalable Modal containers. It provides progressive complexity—simple usage mirrors the original Agent SDK, while advanced features expose Modal's full capabilities (GPU, volumes, image customization, etc.).
+
+## Features
+
+| Feature | modal-agents-sdk | claude-agent-sdk |
+|---------|-----------------|------------------|
+| Sandboxed execution | ✅ Modal containers | ❌ Local only |
+| GPU support | ✅ A10G, H100, A100, etc. | ❌ |
+| Persistent storage | ✅ Modal Volumes | ❌ |
+| Custom images | ✅ Docker/Dockerfile | ❌ |
+| Network isolation | ✅ Configurable | ❌ |
+| Auto-scaling | ✅ Built-in | ❌ |
+| Built-in tools | ✅ Read, Write, Bash, etc. | ✅ |
+| MCP servers | ✅ | ✅ |
+| Multi-turn conversations | ✅ | ✅ |
+
 ## Installation
 
 ```bash
