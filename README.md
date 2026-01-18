@@ -2,44 +2,13 @@
 
 > **Disclaimer**: This is an unofficial community package. It is not affiliated with, endorsed by, or associated with Anthropic or Modal in any way.
 
-Run [Claude Agent SDK](https://github.com/anthropics/claude-code/tree/main/packages/claude-agent-sdk) agents in [Modal](https://modal.com) sandboxes.
-
-This package wraps the Claude Agent SDK to execute AI agents in secure, scalable Modal containers. It provides progressive complexity—simple usage mirrors the original Agent SDK, while advanced features expose Modal's full capabilities (GPU, volumes, image customization, etc.).
+Run [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) agents in [Modal](https://modal.com) sandboxes.
 
 ## Installation
 
 ```bash
-pip install git+https://github.com/sshh12/modal-claude-agent-sdk-python.git
+pip install modal-agents-sdk
 ```
-
-## Quick Start
-
-```python
-import asyncio
-from modal_agents_sdk import query
-
-async def main():
-    async for message in query("Create a hello.txt file with 'Hello, World!'"):
-        print(message)
-
-asyncio.run(main())
-```
-
-## Features
-
-| Feature | modal-agents-sdk | claude-agent-sdk |
-|---------|-----------------|------------------|
-| Sandboxed execution | ✅ Modal containers | ❌ Local only |
-| GPU support | ✅ A10G, H100, A100, etc. | ❌ |
-| Persistent storage | ✅ Modal Volumes | ❌ |
-| Custom images | ✅ Docker/Dockerfile | ❌ |
-| Network isolation | ✅ Configurable | ❌ |
-| Auto-scaling | ✅ Built-in | ❌ |
-| Built-in tools | ✅ Read, Write, Bash, etc. | ✅ |
-| MCP servers | ✅ | ✅ |
-| Multi-turn conversations | ✅ | ✅ |
-
-## Configuration
 
 ### Prerequisites
 
@@ -49,34 +18,75 @@ asyncio.run(main())
    pip install modal
    modal setup
    ```
-3. **Anthropic API key**: Create a Modal secret with your API key
+3. **Anthropic API key**: Create a Modal secret
    ```bash
    modal secret create anthropic-key ANTHROPIC_API_KEY=sk-ant-...
    ```
 
-### Basic Options
+## Quick Start
 
 ```python
-from modal_agents_sdk import query, ModalAgentOptions
+import asyncio
+from modal_agents_sdk import query
+
+async def main():
+    async for message in query("What is 2 + 2?"):
+        print(message)
+
+asyncio.run(main())
+```
+
+## Basic Usage: `query()`
+
+`query()` is an async function for querying Claude in a Modal sandbox. It returns an `AsyncIterator` of response messages.
+
+```python
+from modal_agents_sdk import query, ModalAgentOptions, AssistantMessage, TextBlock
 import modal
 
-options = ModalAgentOptions(
-    # Claude options
-    system_prompt="You are a helpful coding assistant",
-    allowed_tools=["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
-    max_turns=10,
-    model="claude-sonnet-4-20250514",
+# Simple query
+async for message in query(prompt="Hello Claude"):
+    if isinstance(message, AssistantMessage):
+        for block in message.content:
+            if isinstance(block, TextBlock):
+                print(block.text)
 
-    # Modal options
+# With options
+options = ModalAgentOptions(
+    system_prompt="You are a helpful assistant",
+    max_turns=3,
     secrets=[modal.Secret.from_name("anthropic-key")],
-    timeout=3600,
 )
 
-async for message in query("Refactor the utils.py file", options=options):
+async for message in query(prompt="Tell me a joke", options=options):
     print(message)
 ```
 
-### GPU Compute
+## Using Tools
+
+```python
+options = ModalAgentOptions(
+    allowed_tools=["Read", "Write", "Bash"],
+    permission_mode="acceptEdits",  # auto-accept file edits
+    secrets=[modal.Secret.from_name("anthropic-key")],
+)
+
+async for message in query(prompt="Create a hello.py file", options=options):
+    pass
+```
+
+## Working Directory
+
+```python
+from pathlib import Path
+
+options = ModalAgentOptions(
+    cwd="/workspace/myproject",  # or Path("/workspace/myproject")
+    secrets=[modal.Secret.from_name("anthropic-key")],
+)
+```
+
+## GPU Compute
 
 ```python
 options = ModalAgentOptions(
@@ -86,13 +96,12 @@ options = ModalAgentOptions(
 )
 ```
 
-### Persistent Storage
+## Persistent Storage
 
 ```python
 import modal
 
-# Create a volume for persistent data
-data_volume = modal.Volume.from_name("my-project-data", create_if_missing=True)
+data_volume = modal.Volume.from_name("my-data", create_if_missing=True)
 
 options = ModalAgentOptions(
     volumes={"/data": data_volume},
@@ -102,7 +111,7 @@ options = ModalAgentOptions(
 # Files written to /data persist across sandbox executions
 ```
 
-### Custom Image
+## Custom Image
 
 ```python
 from modal_agents_sdk import ModalAgentImage
@@ -120,25 +129,25 @@ options = ModalAgentOptions(
 )
 ```
 
-### Network Restrictions
+## Network Restrictions
+
+The agent requires network access to call the Anthropic API. Use `cidr_allowlist` to restrict access while allowing the API:
 
 ```python
-# Block all network access
-options = ModalAgentOptions(
-    block_network=True,
-    secrets=[modal.Secret.from_name("anthropic-key")],
-)
+# Anthropic API CIDR (required): 160.79.104.0/23
+# Source: https://docs.anthropic.com/en/api/ip-addresses
 
-# Allow specific CIDRs only
 options = ModalAgentOptions(
-    cidr_allowlist=["10.0.0.0/8", "192.168.1.0/24"],
+    cidr_allowlist=["160.79.104.0/23"],  # Anthropic API only
     secrets=[modal.Secret.from_name("anthropic-key")],
 )
 ```
 
-## Multi-turn Conversations
+**Note:** `block_network=True` is not supported as it would prevent API calls.
 
-Use `ModalAgentClient` for conversations that span multiple queries:
+## `ModalAgentClient`
+
+`ModalAgentClient` supports multi-turn conversations:
 
 ```python
 from modal_agents_sdk import ModalAgentClient, ModalAgentOptions
@@ -149,23 +158,17 @@ options = ModalAgentOptions(
 )
 
 async with ModalAgentClient(options=options) as client:
-    # First query
     await client.query("Create a Python project structure")
     async for msg in client.receive_response():
         print(msg)
 
-    # Follow-up query (maintains context)
-    await client.query("Now add a requirements.txt with common dependencies")
+    # Follow-up (maintains context)
+    await client.query("Now add a requirements.txt")
     async for msg in client.receive_response():
         print(msg)
-
-    # Export conversation history
-    print(client.export_history())
 ```
 
 ## MCP Servers
-
-Configure external MCP servers for additional tools:
 
 ```python
 options = ModalAgentOptions(
@@ -174,142 +177,62 @@ options = ModalAgentOptions(
             "command": "npx",
             "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
         },
-        "github": {
-            "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-github"],
-            "env": {"GITHUB_TOKEN": "..."},
-        },
     },
     secrets=[modal.Secret.from_name("anthropic-key")],
 )
 ```
 
-## API Reference
+## Types
 
-### `query(prompt, *, options=None)`
+See `src/modal_agents_sdk/_types.py` for complete type definitions. Key types are re-exported from `claude-agent-sdk`:
 
-Execute a single agent query in a Modal sandbox.
-
-**Parameters:**
-- `prompt` (str): The prompt to send to the agent
-- `options` (ModalAgentOptions, optional): Configuration options
-
-**Yields:** `Message` objects from the agent response
-
-### `ModalAgentClient`
-
-Client for multi-turn conversations.
-
-**Methods:**
-- `async connect()`: Establish connection to sandbox
-- `async disconnect()`: Disconnect and cleanup
-- `async query(prompt)`: Send a query
-- `async receive_response()`: Receive response messages
-- `async query_and_receive(prompt)`: Combined query and receive
-- `get_conversation_history()`: Get conversation history
-- `clear_history()`: Clear conversation history
-- `export_history()`: Export history as JSON
-
-### `ModalAgentOptions`
-
-Configuration dataclass with the following fields:
-
-**Claude Agent SDK Options:**
-- `system_prompt`: System prompt for the agent
-- `allowed_tools`: List of allowed tools
-- `disallowed_tools`: List of disallowed tools
-- `mcp_servers`: MCP server configurations
-- `max_turns`: Maximum conversation turns
-- `permission_mode`: Permission mode (`"acceptEdits"` by default)
-- `cwd`: Working directory (default: `/workspace`)
-- `model`: Model to use
-- `output_format`: Output format configuration
-- `agents`: Custom agent definitions
-- `hooks`: Hooks for observability
-- `can_use_tool`: Tool validation callback
-
-**Modal Sandbox Options:**
-- `image`: Custom `ModalAgentImage`
-- `gpu`: GPU type (e.g., `"A10G"`, `"H100"`)
-- `cpu`: CPU cores
-- `memory`: Memory in MiB
-- `timeout`: Execution timeout (default: 3600)
-- `idle_timeout`: Idle timeout
-- `volumes`: Volume mounts
-- `network_file_systems`: NFS mounts
-- `secrets`: Modal secrets
-- `env`: Environment variables
-- `block_network`: Block all network access
-- `cidr_allowlist`: Allowed CIDR blocks
-- `cloud`: Cloud provider (`"aws"` or `"gcp"`)
-- `region`: Region(s) to run in
-- `name`: Sandbox name
-- `app`: Modal App instance
-- `verbose`: Enable verbose logging
-
-### `ModalAgentImage`
-
-Fluent builder for customizing the sandbox container image.
-
-**Class Methods:**
-- `default(python_version="3.11", node_version="20")`: Create default image
-- `from_registry(tag, ...)`: Create from Docker registry
-- `from_dockerfile(path, ...)`: Create from Dockerfile
-
-**Instance Methods:**
-- `pip_install(*packages)`: Install Python packages
-- `apt_install(*packages)`: Install system packages
-- `run_commands(*commands)`: Run shell commands
-- `add_local_file(local_path, remote_path)`: Add local file
-- `add_local_dir(local_path, remote_path)`: Add local directory
-- `env(vars)`: Set environment variables
-- `workdir(path)`: Set working directory
+- `AssistantMessage`, `UserMessage`, `SystemMessage`, `ResultMessage` - Message types
+- `TextBlock`, `ToolUseBlock`, `ToolResultBlock`, `ThinkingBlock` - Content blocks
 
 ## Error Handling
 
 ```python
 from modal_agents_sdk import (
-    query,
-    ModalAgentError,
-    SandboxCreationError,
-    SandboxTimeoutError,
-    SandboxTerminatedError,
-    ImageBuildError,
-    CLINotInstalledError,
-    AgentExecutionError,
+    ModalAgentError,        # Base error
+    SandboxCreationError,   # Failed to create sandbox
+    SandboxTimeoutError,    # Execution timed out
+    SandboxTerminatedError, # Sandbox terminated
+    ImageBuildError,        # Image build failed
+    CLINotInstalledError,   # claude-agent-sdk not in image
+    AgentExecutionError,    # Agent execution failed
 )
 
 try:
-    async for message in query("Do something", options=options):
-        print(message)
+    async for message in query(prompt="Hello", options=options):
+        pass
 except SandboxTimeoutError:
     print("Execution timed out")
-except SandboxCreationError as e:
-    print(f"Failed to create sandbox: {e}")
 except AgentExecutionError as e:
-    print(f"Agent failed with exit code {e.exit_code}: {e}")
-except ModalAgentError as e:
-    print(f"Error: {e}")
+    print(f"Agent failed: exit code {e.exit_code}")
 ```
+
+## Examples
+
+See the `examples/` directory:
+
+- `quick_start.py` - Basic usage
+- `custom_image.py` - Image customization
+- `gpu_compute.py` - GPU-enabled agent
+- `persistent_storage.py` - Using volumes
+- `multi_turn.py` - Multi-turn conversations
+- `security_sandbox.py` - Network isolation
+- `budget_control.py` - Cost tracking
 
 ## Development
 
 ```bash
-# Clone the repository
 git clone https://github.com/sshh12/modal-claude-agent-sdk-python
 cd modal-claude-agent-sdk-python
-
-# Install in development mode
 pip install -e ".[dev]"
 
-# Run tests
-pytest
-
-# Run type checking
-mypy src/
-
-# Run linting
-ruff check src/
+pytest          # Run tests
+mypy src/       # Type checking
+ruff check src/ # Linting
 ```
 
 ## License
