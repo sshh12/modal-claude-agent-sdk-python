@@ -1,6 +1,5 @@
 """Tests for ModalAgentImage."""
 
-
 from modal_agents_sdk import ModalAgentImage
 
 
@@ -58,10 +57,12 @@ class TestModalAgentImage:
 
     def test_env_sets_variables(self):
         """Test that env() sets environment variables."""
-        image = ModalAgentImage.default().env({
-            "VAR1": "value1",
-            "VAR2": "value2",
-        })
+        image = ModalAgentImage.default().env(
+            {
+                "VAR1": "value1",
+                "VAR2": "value2",
+            }
+        )
 
         assert image is not None
 

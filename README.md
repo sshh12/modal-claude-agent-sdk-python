@@ -246,9 +246,14 @@ git clone https://github.com/sshh12/modal-claude-agent-sdk-python
 cd modal-claude-agent-sdk-python
 pip install -e ".[dev]"
 
+# Install pre-commit hooks
+pre-commit install
+
+# Run checks manually
 pytest          # Run tests
 mypy src/       # Type checking
 ruff check src/ # Linting
+ruff format src/ tests/  # Format code
 ```
 
 ## License

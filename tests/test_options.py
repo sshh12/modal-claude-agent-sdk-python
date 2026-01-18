@@ -1,6 +1,5 @@
 """Tests for ModalAgentOptions."""
 
-
 from modal_agents_sdk import ModalAgentOptions
 from modal_agents_sdk._constants import (
     DEFAULT_ALLOWED_TOOLS,

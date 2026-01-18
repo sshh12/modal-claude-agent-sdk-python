@@ -1,6 +1,5 @@
 """Tests for query() function and related utilities."""
 
-
 from modal_agents_sdk import ModalAgentOptions
 from modal_agents_sdk._utils import build_sdk_options, parse_stream_message
 
@@ -88,9 +87,7 @@ class TestBuildSdkOptions:
 
     def test_agents_config(self):
         """Test custom agents option."""
-        agents_config = {
-            "researcher": {"system_prompt": "You are a researcher"}
-        }
+        agents_config = {"researcher": {"system_prompt": "You are a researcher"}}
         options = ModalAgentOptions(agents=agents_config)
         sdk_options = build_sdk_options(options)
 

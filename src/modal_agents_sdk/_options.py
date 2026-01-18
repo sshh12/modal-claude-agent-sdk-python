@@ -14,7 +14,6 @@ from ._constants import (
 )
 
 if TYPE_CHECKING:
-
     from ._image import ModalAgentImage
 
 

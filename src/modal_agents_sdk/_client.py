@@ -130,10 +130,12 @@ class ModalAgentClient:
 
             # Store assistant responses in history
             if raw_message.get("type") == "assistant":
-                self._conversation_history.append({
-                    "role": "assistant",
-                    "content": raw_message.get("content", []),
-                })
+                self._conversation_history.append(
+                    {
+                        "role": "assistant",
+                        "content": raw_message.get("content", []),
+                    }
+                )
             yield message
 
         self._pending_response = None
