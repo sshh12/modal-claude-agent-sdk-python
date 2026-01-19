@@ -71,7 +71,11 @@ class SecurityAuditLog:
         """Create a safe summary of tool input for logging."""
         if tool_name == "Bash":
             cmd = tool_input.get("command", "")[:80]
-            return f"command='{cmd}...'" if len(tool_input.get("command", "")) > 80 else f"command='{cmd}'"
+            return (
+                f"command='{cmd}...'"
+                if len(tool_input.get("command", "")) > 80
+                else f"command='{cmd}'"
+            )
         elif tool_name in ["Write", "Edit", "Read"]:
             return f"file={tool_input.get('file_path', 'unknown')}"
         else:
@@ -181,8 +185,7 @@ async def main():
                     audit_log.log_tool_use(block.name, block.input, block.id)
                 elif isinstance(block, ToolResultBlock):
                     audit_log.log_tool_result(
-                        block.tool_use_id,
-                        block.is_error if block.is_error else False
+                        block.tool_use_id, block.is_error if block.is_error else False
                     )
         elif isinstance(message, ResultMessage):
             print(f"\n[{message.subtype}] Completed in {message.num_turns} turns")

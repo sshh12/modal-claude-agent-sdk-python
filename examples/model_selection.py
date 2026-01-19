@@ -45,10 +45,10 @@ async def run_with_model(task: str, model: str, description: str) -> dict:
     Returns:
         A dict with model, duration_ms, total_cost_usd, and num_turns.
     """
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Task: {description}")
     print(f"Model: {model}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     options = ModalAgentOptions(
         model=model,

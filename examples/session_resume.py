@@ -197,7 +197,9 @@ async def demo_multi_turn():
         print("Turn 1: Creating a file...")
         print("-" * 40)
 
-        await client.query("Create a file called greeting.py with a function greet(name) that returns 'Hello, {name}!'")
+        await client.query(
+            "Create a file called greeting.py with a function greet(name) that returns 'Hello, {name}!'"
+        )
 
         async for msg in client.receive_response():
             if isinstance(msg, AssistantMessage):
@@ -215,7 +217,9 @@ async def demo_multi_turn():
         print("Turn 2: Modifying the file...")
         print("-" * 40)
 
-        await client.query("Add a farewell(name) function to greeting.py that returns 'Goodbye, {name}!'")
+        await client.query(
+            "Add a farewell(name) function to greeting.py that returns 'Goodbye, {name}!'"
+        )
 
         async for msg in client.receive_response():
             if isinstance(msg, AssistantMessage):
@@ -225,7 +229,7 @@ async def demo_multi_turn():
                     elif isinstance(block, ToolUseBlock):
                         print(f"[tool] {block.name}")
             elif isinstance(msg, ResultMessage):
-                print(f"\n[Turn 2 complete]")
+                print("\n[Turn 2 complete]")
 
         # Turn 3: Use the file (agent remembers both functions)
         print()
@@ -233,7 +237,9 @@ async def demo_multi_turn():
         print("Turn 3: Testing the functions...")
         print("-" * 40)
 
-        await client.query("Create a test script that imports greeting.py and tests both functions, then run it")
+        await client.query(
+            "Create a test script that imports greeting.py and tests both functions, then run it"
+        )
 
         async for msg in client.receive_response():
             if isinstance(msg, AssistantMessage):
@@ -243,7 +249,7 @@ async def demo_multi_turn():
                     elif isinstance(block, ToolUseBlock):
                         print(f"[tool] {block.name}")
             elif isinstance(msg, ResultMessage):
-                print(f"\n[Turn 3 complete]")
+                print("\n[Turn 3 complete]")
                 print(f"Final session ID: {msg.session_id[:30]}...")
 
     print()
@@ -267,7 +273,7 @@ async def main():
     saved = load_session()
 
     if saved:
-        print(f"Found saved session:")
+        print("Found saved session:")
         print(f"  ID: {saved['session_id'][:30]}...")
         print(f"  Snapshot: {saved.get('snapshot_id', 'N/A')}")
         print(f"  Description: {saved['description']}")
@@ -281,9 +287,9 @@ async def main():
 
         choice = input("Choose an option (r/m/n): ").lower().strip()
 
-        if choice == 'r':
-            await resume_session(saved['session_id'], saved.get('snapshot_id', ''))
-        elif choice == 'm':
+        if choice == "r":
+            await resume_session(saved["session_id"], saved.get("snapshot_id", ""))
+        elif choice == "m":
             await demo_multi_turn()
         else:
             await start_new_session()
@@ -297,7 +303,7 @@ async def main():
 
         choice = input("Choose an option (n/m): ").lower().strip()
 
-        if choice == 'm':
+        if choice == "m":
             await demo_multi_turn()
         else:
             await start_new_session()

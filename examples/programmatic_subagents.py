@@ -96,7 +96,7 @@ async def main():
     )
 
     # Sample code for the agents to work on
-    sample_code = '''
+    sample_code = """
 def calculate_discount(price, discount_percent):
     if discount_percent > 100:
         return 0
@@ -110,7 +110,7 @@ def apply_bulk_discount(items, threshold=10):
 
 def format_price(amount):
     return f"${amount:.2f}"
-'''
+"""
 
     prompt = f"""
 I have this Python pricing module that needs improvement:

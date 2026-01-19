@@ -139,7 +139,9 @@ async def example_configurations():
         secrets=[modal.Secret.from_name("anthropic-key")],
     )
     print("Light tasks (simple file operations, small scripts):")
-    print(f"  CPU: {light_config.cpu}, Memory: {light_config.memory} MiB, Timeout: {light_config.timeout}s")
+    print(
+        f"  CPU: {light_config.cpu}, Memory: {light_config.memory} MiB, Timeout: {light_config.timeout}s"
+    )
 
     # Configuration 2: Build/compile tasks
     build_config = ModalAgentOptions(
@@ -149,7 +151,9 @@ async def example_configurations():
         secrets=[modal.Secret.from_name("anthropic-key")],
     )
     print("\nBuild/compile tasks (npm install, cargo build, make):")
-    print(f"  CPU: {build_config.cpu}, Memory: {build_config.memory} MiB, Timeout: {build_config.timeout}s")
+    print(
+        f"  CPU: {build_config.cpu}, Memory: {build_config.memory} MiB, Timeout: {build_config.timeout}s"
+    )
 
     # Configuration 3: Data processing
     data_config = ModalAgentOptions(
@@ -160,7 +164,9 @@ async def example_configurations():
         secrets=[modal.Secret.from_name("anthropic-key")],
     )
     print("\nData processing (pandas, large files):")
-    print(f"  CPU: {data_config.cpu}, Memory: {data_config.memory} MiB, Timeout: {data_config.timeout}s")
+    print(
+        f"  CPU: {data_config.cpu}, Memory: {data_config.memory} MiB, Timeout: {data_config.timeout}s"
+    )
 
     # Configuration 4: Interactive/long-running
     interactive_config = ModalAgentOptions(
@@ -171,7 +177,9 @@ async def example_configurations():
         secrets=[modal.Secret.from_name("anthropic-key")],
     )
     print("\nInteractive/long-running sessions:")
-    print(f"  CPU: {interactive_config.cpu}, Memory: {interactive_config.memory} MiB, Timeout: {interactive_config.timeout}s")
+    print(
+        f"  CPU: {interactive_config.cpu}, Memory: {interactive_config.memory} MiB, Timeout: {interactive_config.timeout}s"
+    )
     print(f"  Idle timeout: {interactive_config.idle_timeout}s")
 
 

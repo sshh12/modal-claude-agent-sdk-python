@@ -309,14 +309,10 @@ class SandboxManager:
             if self.options.verbose:
                 print(f"Stdout length: {len(stdout_content)} bytes", flush=True)
                 # Debug: show first 500 chars of raw stdout
-                preview = stdout_content[:500] if isinstance(stdout_content, str) else stdout_content[:500].decode("utf-8", errors="replace")
-                print(f"Stdout preview: {preview}", flush=True)
+                print(f"Stdout preview: {stdout_content[:500]}", flush=True)
 
             # Parse and yield messages
             for line in stdout_content.split("\n"):
-                if isinstance(line, bytes):
-                    line = line.decode("utf-8")
-
                 if self.options.verbose and line.strip():
                     print(f"Processing line: {line[:100]}...", flush=True)
 

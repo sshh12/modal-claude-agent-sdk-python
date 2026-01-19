@@ -104,19 +104,12 @@ if __name__ == "__main__":
         with vol.batch_upload() as batch:
             # Upload JSON data
             batch.put_file(
-                io.BytesIO(json.dumps(sample_data, indent=2).encode()),
-                "/input/employees.json"
+                io.BytesIO(json.dumps(sample_data, indent=2).encode()), "/input/employees.json"
             )
             # Upload config file
-            batch.put_file(
-                io.BytesIO(sample_config.encode()),
-                "/input/config.ini"
-            )
+            batch.put_file(io.BytesIO(sample_config.encode()), "/input/config.ini")
             # Upload the analysis script
-            batch.put_file(
-                io.BytesIO(analysis_script.encode()),
-                "/input/analyze.py"
-            )
+            batch.put_file(io.BytesIO(analysis_script.encode()), "/input/analyze.py")
 
         print("Files uploaded successfully!")
         print("  - /input/employees.json")

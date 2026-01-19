@@ -19,13 +19,10 @@ from modal_agents_sdk import (
 async def main():
     """Run an agent with GPU access for ML workloads."""
     # Create image with PyTorch and CUDA support
-    image = (
-        ModalAgentImage.default()
-        .pip_install(
-            "torch",
-            "torchvision",
-            "transformers",
-        )
+    image = ModalAgentImage.default().pip_install(
+        "torch",
+        "torchvision",
+        "transformers",
     )
 
     options = ModalAgentOptions(
