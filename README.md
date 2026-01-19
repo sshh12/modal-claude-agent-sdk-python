@@ -262,6 +262,47 @@ async for message in query("Get the DATABASE_URL secret", options=options):
     print(message)
 ```
 
+### Modal Functions as Tools
+
+Expose deployed Modal functions as host tools to offload compute-intensive work to separate Modal containers:
+
+```python
+# modal_compute_functions.py - Deploy separately with: modal deploy modal_compute_functions.py
+import modal
+
+app = modal.App("agent-compute-tools")
+
+@app.function()
+def compute_fibonacci(n: int) -> dict:
+    def fib(x): return x if x <= 1 else fib(x-1) + fib(x-2)
+    return {"fibonacci": fib(n), "n": n}
+```
+
+```python
+# main.py - Run after deploying the Modal function
+import modal
+from modal_agents_sdk import HostTool, HostToolServer, ModalAgentOptions, query
+
+async def fibonacci_handler(args: dict) -> dict:
+    func = modal.Function.from_name("agent-compute-tools", "compute_fibonacci")
+    result = await func.remote.aio(n=args["n"])
+    import json
+    return {"content": [{"type": "text", "text": json.dumps(result)}]}
+
+tool = HostTool(
+    name="compute_fibonacci",
+    description="Compute the nth Fibonacci number",
+    input_schema={"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]},
+    handler=fibonacci_handler,
+)
+
+server = HostToolServer(name="compute-tools", tools=[tool])
+options = ModalAgentOptions(host_tools=[server], secrets=[modal.Secret.from_name("anthropic-key")])
+
+async for message in query("Calculate fibonacci(20)", options=options):
+    print(message)
+```
+
 ## Types
 
 See `src/modal_agents_sdk/_types.py` for complete type definitions. Key types are re-exported from `claude-agent-sdk`:
@@ -309,7 +350,7 @@ See the `examples/` directory for complete working examples:
 - `persistent_storage.py` - Using Modal volumes for data persistence
 - `network_file_system.py` - NFS for shared storage across sandboxes
 - `ephemeral_volume_upload.py` - Upload local files to sandbox
-- `sandbox_snapshot.py` - Save and restore sandbox filesystem state
+- `multi_turn_snapshots.py` - Multi-turn conversations with sandbox snapshots between turns
 - `session_resume.py` - Persist conversation state across runs
 
 ### Security & Monitoring
@@ -324,6 +365,7 @@ See the `examples/` directory for complete working examples:
 - `multi_agent.py` - Define specialized sub-agents for delegation
 - `programmatic_subagents.py` - Custom agents with `AgentDefinition`
 - `host_tools.py` - Custom tools that run on host machine
+- `host_modal_functions_as_tools.py` - Use deployed Modal functions as agent tools
 
 ### Integrations
 - `tunnel_web_app.py` - Build and expose web servers via encrypted tunnels

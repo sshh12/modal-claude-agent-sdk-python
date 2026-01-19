@@ -11,7 +11,7 @@ from ._sandbox import SandboxManager
 from ._types import Message
 
 if TYPE_CHECKING:
-    pass
+    from modal import Image
 
 
 class ModalAgentClient:
@@ -216,6 +216,33 @@ class ModalAgentClient:
         if not self._is_connected:
             raise RuntimeError("Not connected. Call connect() first.")
         return self._manager.tunnels()
+
+    async def snapshot(self) -> Image:
+        """Snapshot the current sandbox filesystem state.
+
+        Creates a Modal Image from the current filesystem state, which can be
+        used to create new sandboxes with the same files and environment.
+
+        Returns:
+            A modal.Image containing the snapshot of the filesystem.
+
+        Raises:
+            RuntimeError: If not connected to a sandbox.
+
+        Example:
+            >>> async with ModalAgentClient(options=options) as client:
+            ...     await client.query("Create some files")
+            ...     async for msg in client.receive_response():
+            ...         pass
+            ...     snapshot = await client.snapshot()
+            ...     # Use snapshot for next sandbox
+            ...     next_options = options.with_updates(image=ModalAgentImage(snapshot))
+        """
+        if not self._is_connected:
+            raise RuntimeError("Not connected. Call connect() first.")
+        if self._manager.sandbox is None:
+            raise RuntimeError("Sandbox not available.")
+        return await self._manager.sandbox.snapshot_filesystem.aio()
 
     async def __aenter__(self) -> ModalAgentClient:
         """Enter async context manager."""
