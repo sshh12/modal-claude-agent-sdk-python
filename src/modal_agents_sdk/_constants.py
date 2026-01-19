@@ -31,19 +31,18 @@ RUNNER_SCRIPT = '''
 import asyncio
 import json
 import os
-import shutil
 import sys
 import threading
-import time
 import uuid
 from dataclasses import asdict, is_dataclass
 
 # Lock for synchronized stdout writes to prevent interleaved output
 _stdout_lock = threading.Lock()
 
-# File-based response queue constants
-RESPONSE_DIR = "/tmp/responses"
-POLL_INTERVAL = 0.05  # 50ms
+# Response handling - thread-safe dict with asyncio Events for cross-thread signaling
+_response_events: dict[str, asyncio.Event] = {}
+_response_data: dict[str, dict] = {}
+_response_lock = threading.Lock()
 
 
 def serialize_message(message):
@@ -62,16 +61,26 @@ def emit_message(msg_type, data):
     """Emit a message to stdout for the host to receive.
 
     Uses a lock to ensure atomic writes when multiple coroutines
-    emit messages concurrently.
+    emit messages concurrently. Includes a small delay to ensure Modal's
+    stdout streaming handles each line correctly.
     """
+    import time
+
     output = {"_type": msg_type, **data}
     # Encode to bytes and write to raw stdout to bypass buffering issues
     output_bytes = (json.dumps(output) + chr(10)).encode("utf-8")
+
     with _stdout_lock:
         sys.stdout.buffer.write(output_bytes)
         sys.stdout.buffer.flush()
-        # Force OS-level flush to ensure data reaches the host
-        os.fsync(sys.stdout.buffer.fileno())
+        # Force sync to OS to ensure data is truly flushed
+        try:
+            os.fsync(sys.stdout.fileno())
+        except (OSError, AttributeError):
+            pass  # fsync may not be supported on all platforms
+        # Small delay (50ms) to prevent rapid-fire writes that Modal might not
+        # handle well - this fixes intermittent line loss in stdout streaming
+        time.sleep(0.05)
 
 
 def emit_agent_message(message):
@@ -80,86 +89,100 @@ def emit_agent_message(message):
     emit_message("message", serialized)
 
 
-class StdinToFileWriter:
-    """Simple stdin reader that writes responses to files.
+class StdinResponseReader:
+    """Reads responses from stdin and signals waiting coroutines.
 
-    This replaces the complex StdinRouter with a simpler approach:
-    - Reads JSON from stdin
-    - Writes each response to a file named {request_id}.json
-    - Uses atomic write (temp file + rename) for reliability
+    Uses asyncio Events for efficient cross-thread signaling instead of
+    file-based polling.
     """
 
     def __init__(self):
         self._running = False
         self._thread = None
+        self._loop = None
+        self._responses_received = 0
 
-    def start(self):
+    def start(self, loop):
         if self._running:
             return
-        os.makedirs(RESPONSE_DIR, exist_ok=True)
         self._running = True
+        self._loop = loop
         self._thread = threading.Thread(target=self._reader_loop, daemon=True)
         self._thread.start()
+        sys.stderr.write("[StdinReader] Started\\n")
+        sys.stderr.flush()
 
     def _reader_loop(self):
+        sys.stderr.write("[StdinReader] Reader loop started\\n")
+        sys.stderr.flush()
         while self._running:
             try:
                 line = sys.stdin.readline()
                 if not line:
+                    sys.stderr.write("[StdinReader] EOF on stdin\\n")
+                    sys.stderr.flush()
                     break
                 line = line.strip()
                 if not line:
                     continue
 
+                sys.stderr.write(f"[StdinReader] Got line: {line[:60]}...\\n")
+                sys.stderr.flush()
+
                 response = json.loads(line)
                 request_id = response.get("request_id")
                 if not request_id:
+                    sys.stderr.write("[StdinReader] No request_id in response\\n")
+                    sys.stderr.flush()
                     continue
 
-                # Atomic write: temp file + rename
-                temp_path = f"{RESPONSE_DIR}/.{request_id}.tmp"
-                final_path = f"{RESPONSE_DIR}/{request_id}.json"
+                self._responses_received += 1
+                sys.stderr.write(f"[StdinReader] Response #{self._responses_received} for {request_id}\\n")
+                sys.stderr.flush()
 
-                with open(temp_path, "w") as f:
-                    json.dump(response, f)
-                    f.flush()
-                    os.fsync(f.fileno())
+                # Store response and signal the waiting coroutine
+                with _response_lock:
+                    _response_data[request_id] = response
+                    event = _response_events.get(request_id)
+                    has_event = event is not None
 
-                os.rename(temp_path, final_path)
-            except json.JSONDecodeError:
+                sys.stderr.write(f"[StdinReader] Event exists: {has_event}\\n")
+                sys.stderr.flush()
+
+                if event and self._loop:
+                    # Signal the event from the event loop thread
+                    self._loop.call_soon_threadsafe(event.set)
+                    sys.stderr.write(f"[StdinReader] Event signaled for {request_id}\\n")
+                    sys.stderr.flush()
+
+            except json.JSONDecodeError as e:
+                sys.stderr.write(f"[StdinReader] JSON decode error: {e}\\n")
+                sys.stderr.flush()
                 continue
-            except Exception:
+            except Exception as e:
+                sys.stderr.write(f"[StdinReader] Exception: {e}\\n")
+                sys.stderr.flush()
                 pass
 
     def stop(self):
         self._running = False
+        sys.stderr.write(f"[StdinReader] Stopped, received {self._responses_received} responses\\n")
+        sys.stderr.flush()
 
 
-async def poll_for_response(request_id: str, timeout: float = 60.0) -> dict | None:
-    """Poll for a response file and return its contents.
+def register_response_event(request_id: str) -> asyncio.Event:
+    """Register an event to be signaled when a response arrives."""
+    event = asyncio.Event()
+    with _response_lock:
+        _response_events[request_id] = event
+    return event
 
-    Args:
-        request_id: The unique ID of the request to wait for
-        timeout: Maximum time to wait in seconds
 
-    Returns:
-        The response dict if found, None if timeout
-    """
-    response_path = f"{RESPONSE_DIR}/{request_id}.json"
-    start_time = time.time()
-
-    while time.time() - start_time < timeout:
-        if os.path.exists(response_path):
-            try:
-                with open(response_path, "r") as f:
-                    response = json.load(f)
-                os.remove(response_path)
-                return response
-            except (json.JSONDecodeError, OSError):
-                pass  # File incomplete or error, retry
-        await asyncio.sleep(POLL_INTERVAL)
-
-    return None
+def get_response(request_id: str) -> dict | None:
+    """Get and remove a response by request_id."""
+    with _response_lock:
+        _response_events.pop(request_id, None)
+        return _response_data.pop(request_id, None)
 
 
 class HostToolProxy:
@@ -174,7 +197,16 @@ class HostToolProxy:
         """Call a host-side tool and return the result."""
         request_id = str(uuid.uuid4())
 
+        sys.stderr.write(f"[HostToolProxy] call_tool: {tool_name}, request_id={request_id}\\n")
+        sys.stderr.flush()
+
+        # Register event BEFORE emitting to avoid race condition
+        event = register_response_event(request_id)
+
         # Emit the tool request to host
+        sys.stderr.write(f"[HostToolProxy] Emitting request for {tool_name}\\n")
+        sys.stderr.flush()
+
         emit_message("host_tool_request", {
             "request_id": request_id,
             "server_name": self.server_name,
@@ -183,8 +215,25 @@ class HostToolProxy:
             "tool_use_id": tool_use_id,
         })
 
-        # Poll for response file (replaces StdinRouter.register_and_wait)
-        response = await poll_for_response(request_id, timeout=self.timeout)
+        # Small delay to ensure stdout propagates through Modal's streaming
+        await asyncio.sleep(0.1)
+
+        sys.stderr.write(f"[HostToolProxy] Request emitted, waiting for response...\\n")
+        sys.stderr.flush()
+
+        # Wait for response
+        try:
+            await asyncio.wait_for(event.wait(), timeout=self.timeout)
+            response = get_response(request_id)
+            sys.stderr.write(f"[HostToolProxy] Got response for {tool_name}\\n")
+            sys.stderr.flush()
+        except asyncio.TimeoutError:
+            sys.stderr.write(f"[HostToolProxy] TIMEOUT for {tool_name}\\n")
+            sys.stderr.flush()
+            with _response_lock:
+                _response_events.pop(request_id, None)
+                _response_data.pop(request_id, None)
+            response = None
 
         if response is None:
             return {
@@ -258,6 +307,9 @@ class HookProxy:
         """Called before a tool is used. Returns (decision, reason, updated_input)."""
         request_id = str(uuid.uuid4())
 
+        # Register event BEFORE emitting to avoid race condition
+        event = register_response_event(request_id)
+
         # Emit hook request
         emit_message("hook_request", {
             "request_id": request_id,
@@ -269,8 +321,16 @@ class HookProxy:
             "cwd": self.cwd,
         })
 
-        # Poll for response file (replaces StdinRouter.register_and_wait)
-        response = await poll_for_response(request_id, timeout=self.timeout)
+        # Wait for response
+        try:
+            await asyncio.wait_for(event.wait(), timeout=self.timeout)
+            response = get_response(request_id)
+        except asyncio.TimeoutError:
+            with _response_lock:
+                _response_events.pop(request_id, None)
+                _response_data.pop(request_id, None)
+            response = None
+
         if response is None:
             # Timeout - allow by default
             return ("allow", None, None)
@@ -424,11 +484,11 @@ async def main():
     # Build ClaudeAgentOptions from the filtered dict
     options = ClaudeAgentOptions(**options_dict)
 
-    # Start file writer if we have host tools or hooks (needed for bidirectional communication)
-    writer = None
+    # Start stdin reader if we have host tools or hooks (needed for bidirectional communication)
+    reader = None
     if host_tools_config or enable_hooks:
-        writer = StdinToFileWriter()
-        writer.start()
+        reader = StdinResponseReader()
+        reader.start(asyncio.get_event_loop())
 
     try:
         # Use ClaudeSDKClient for streaming mode (supports hooks and host tools)
@@ -438,10 +498,8 @@ async def main():
             async for message in client.receive_response():
                 emit_agent_message(message)
     finally:
-        if writer:
-            writer.stop()
-            # Cleanup response directory
-            shutil.rmtree(RESPONSE_DIR, ignore_errors=True)
+        if reader:
+            reader.stop()
 
 
 if __name__ == "__main__":

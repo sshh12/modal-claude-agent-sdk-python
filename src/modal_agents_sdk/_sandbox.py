@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import warnings
@@ -371,6 +372,11 @@ class SandboxManager:
         host-side hooks to intercept tool calls and host-side tools to
         be executed on the host machine.
 
+        Uses a decoupled architecture: a background task continuously reads
+        stdout and dispatches hooks/tools, while agent messages are queued
+        for yielding. This ensures tool requests are handled immediately
+        even when the consumer is slow to process yielded messages.
+
         Args:
             prompt: The prompt to send to the agent.
             resume: Optional session ID to resume.
@@ -443,66 +449,123 @@ class SandboxManager:
             if self.options.verbose:
                 print("Exec started, streaming output...", flush=True)
 
-            # Stream stdout line by line and handle hooks/tools
-            async for line in process.stdout:
-                line = line.strip()
-                if not line:
-                    continue
+            # Queue for agent messages - decouples reading from yielding
+            message_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+            reader_error: list[Exception] = []
 
-                if self.options.verbose:
-                    print(f"Received line: {line[:100]}...", flush=True)
+            async def read_and_dispatch():
+                """Background task: read stdout, dispatch hooks/tools, queue agent messages.
 
-                # Parse the message
-                message = parse_hook_message(line)
-                if message is None:
-                    continue
+                Uses a dedicated stdin writer task to avoid blocking the reader.
+                """
+                # Queue for stdin writes - processed by a separate coroutine
+                stdin_queue: asyncio.Queue[str | None] = asyncio.Queue()
 
-                if is_hook_request(message) and hook_dispatcher:
-                    # Handle hook request
-                    hook_event = message.get("hook_event", "")
-
-                    if hook_event == "PreToolUse":
-                        # Dispatch to pre-tool-use hooks and send response
-                        response = await hook_dispatcher.dispatch_pre_tool_use(message)
-                        response_json = json.dumps(response) + "\n"
-
-                        if self.options.verbose:
-                            print(f"Sending hook response: {response_json.strip()}", flush=True)
-
-                        # Write response to process stdin
+                async def stdin_writer():
+                    """Write responses to stdin without blocking the reader."""
+                    while True:
+                        response_json = await stdin_queue.get()
+                        if response_json is None:
+                            break
                         process.stdin.write(response_json.encode())
                         await process.stdin.drain.aio()
 
-                    elif hook_event == "PostToolUse":
-                        # Fire-and-forget post-tool-use hooks
-                        await hook_dispatcher.dispatch_post_tool_use(message)
+                # Start stdin writer task
+                writer_task = asyncio.create_task(stdin_writer())
 
-                elif is_host_tool_request(message) and tool_dispatcher:
-                    # Handle host tool request
-                    if self.options.verbose:
-                        tool_name = message.get("tool_name", "")
-                        server_name = message.get("server_name", "")
-                        print(f"Dispatching host tool: {server_name}:{tool_name}", flush=True)
+                try:
+                    async for line in process.stdout:
+                        line = line.strip()
+                        if not line:
+                            continue
 
-                    response = await tool_dispatcher.dispatch(message)
-                    response_json = json.dumps(response) + "\n"
+                        if self.options.verbose:
+                            print(f"Received line: {line[:100]}...", flush=True)
 
-                    if self.options.verbose:
-                        is_error = response.get("is_error", False)
-                        print(f"Sending tool response (error={is_error})", flush=True)
+                        # Parse the message
+                        message = parse_hook_message(line)
+                        if message is None:
+                            continue
 
-                    # Write response to process stdin
-                    process.stdin.write(response_json.encode())
-                    await process.stdin.drain.aio()
+                        if self.options.verbose:
+                            msg_type = message.get("_type", "unknown")
+                            print(f"Processing message type: {msg_type}", flush=True)
 
-                elif is_agent_message(message):
-                    # Extract the actual message content (remove _type wrapper)
-                    if "_type" in message:
-                        # The actual message data is the rest of the dict
-                        actual_message = {k: v for k, v in message.items() if k != "_type"}
-                    else:
-                        actual_message = message
-                    yield actual_message
+                        if is_hook_request(message) and hook_dispatcher:
+                            # Handle hook request immediately
+                            hook_event = message.get("hook_event", "")
+
+                            if hook_event == "PreToolUse":
+                                # Dispatch to pre-tool-use hooks and send response
+                                response = await hook_dispatcher.dispatch_pre_tool_use(message)
+                                response_json = json.dumps(response) + "\n"
+
+                                if self.options.verbose:
+                                    print(
+                                        f"Sending hook response: {response_json.strip()}",
+                                        flush=True,
+                                    )
+
+                                # Queue response for stdin writer
+                                await stdin_queue.put(response_json)
+
+                            elif hook_event == "PostToolUse":
+                                # Fire-and-forget post-tool-use hooks
+                                await hook_dispatcher.dispatch_post_tool_use(message)
+
+                        elif is_host_tool_request(message) and tool_dispatcher:
+                            # Handle host tool request immediately
+                            if self.options.verbose:
+                                tool_name = message.get("tool_name", "")
+                                server_name = message.get("server_name", "")
+                                print(
+                                    f"Dispatching host tool: {server_name}:{tool_name}",
+                                    flush=True,
+                                )
+
+                            response = await tool_dispatcher.dispatch(message)
+                            response_json = json.dumps(response) + "\n"
+
+                            if self.options.verbose:
+                                is_error = response.get("is_error", False)
+                                print(f"Sending tool response (error={is_error})", flush=True)
+
+                            # Queue response for stdin writer
+                            await stdin_queue.put(response_json)
+
+                        elif is_agent_message(message):
+                            # Queue agent message for yielding
+                            if "_type" in message:
+                                actual_message = {k: v for k, v in message.items() if k != "_type"}
+                            else:
+                                actual_message = message
+                            await message_queue.put(actual_message)
+
+                except Exception as e:
+                    reader_error.append(e)
+                finally:
+                    # Stop stdin writer and signal end of messages
+                    await stdin_queue.put(None)
+                    await writer_task
+                    await message_queue.put(None)
+
+            # Start background reader task
+            reader_task = asyncio.create_task(read_and_dispatch())
+
+            try:
+                # Yield messages from queue while reader runs in background
+                while True:
+                    msg = await message_queue.get()
+                    if msg is None:
+                        break
+                    yield msg
+            finally:
+                # Ensure reader task completes
+                await reader_task
+
+            # Check for reader errors
+            if reader_error:
+                raise reader_error[0]
 
             # Wait for process to complete
             await process.wait.aio()
