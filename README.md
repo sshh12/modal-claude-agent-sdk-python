@@ -18,8 +18,8 @@ This package wraps the Claude Agent SDK to execute AI agents in secure, scalable
 | Auto-scaling | ✅ Built-in | ❌ |
 | Built-in tools | ✅ Read, Write, Bash, etc. | ✅ |
 | MCP servers | ✅ | ✅ |
-| Host-side hooks | ✅ Intercept tool calls | ❌ |
-| Host-side tools | ✅ Run on local machine | ❌ |
+| Host-side hooks | ✅ Intercept tool calls | ✅ |
+| Host-side tools | ✅ Run on local machine | ✅ |
 | Multi-turn conversations | ✅ | ✅ |
 
 ## Installation
