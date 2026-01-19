@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict, is_dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -28,8 +29,11 @@ def build_sdk_options(
     sdk_options: dict[str, Any] = {}
 
     # Resume session for multi-turn conversations
+    # The resume parameter takes precedence over options.resume
     if resume:
         sdk_options["resume"] = resume
+    elif options.resume:
+        sdk_options["resume"] = options.resume
 
     # Working directory (handled specially by runner script)
     sdk_options["cwd"] = str(options.cwd) if options.cwd else "/workspace"
@@ -65,9 +69,17 @@ def build_sdk_options(
     if options.output_format:
         sdk_options["output_format"] = options.output_format
 
-    # Custom agents
+    # Custom agents - convert dataclass instances to dicts for JSON serialization
     if options.agents:
-        sdk_options["agents"] = options.agents
+        agents_dict = {}
+        for name, agent_def in options.agents.items():
+            if is_dataclass(agent_def) and not isinstance(agent_def, type):
+                # Convert dataclass to dict, filtering out None values
+                agents_dict[name] = {k: v for k, v in asdict(agent_def).items() if v is not None}
+            else:
+                # Already a dict or other serializable type
+                agents_dict[name] = agent_def
+        sdk_options["agents"] = agents_dict
 
     # Note: hooks and can_use_tool are not serializable, so they're not included
     # These would need special handling if required

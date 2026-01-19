@@ -47,7 +47,7 @@ def serialize_message(message):
 
 
 async def main():
-    from claude_agent_sdk import query, ClaudeAgentOptions
+    from claude_agent_sdk import query, ClaudeAgentOptions, AgentDefinition
 
     # Parse options and prompt from command line
     options_json = sys.argv[1]
@@ -57,6 +57,14 @@ async def main():
     # Change to working directory
     cwd = options_dict.pop("cwd", "/workspace")
     os.chdir(cwd)
+
+    # Convert agents dicts to AgentDefinition instances
+    if "agents" in options_dict:
+        agents_dict = options_dict["agents"]
+        options_dict["agents"] = {
+            name: AgentDefinition(**agent_def) if isinstance(agent_def, dict) else agent_def
+            for name, agent_def in agents_dict.items()
+        }
 
     # Build ClaudeAgentOptions from the filtered dict
     options = ClaudeAgentOptions(**options_dict)

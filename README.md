@@ -229,15 +229,41 @@ except AgentExecutionError as e:
 
 ## Examples
 
-See the `examples/` directory:
+See the `examples/` directory for complete working examples:
 
-- `quick_start.py` - Basic usage
-- `custom_image.py` - Image customization
-- `gpu_compute.py` - GPU-enabled agent
-- `persistent_storage.py` - Using volumes
-- `multi_turn.py` - Multi-turn conversations
-- `security_sandbox.py` - Network isolation
-- `budget_control.py` - Cost tracking
+### Getting Started
+- `quick_start.py` - Basic usage with message type handling
+- `multi_turn.py` - Multi-turn conversations with `ModalAgentClient`
+
+### Infrastructure & Resources
+- `custom_image.py` - Custom container images with pip/apt packages
+- `gpu_compute.py` - GPU-enabled agents (A10G, CUDA, PyTorch)
+- `resource_limits.py` - CPU, memory, and timeout configuration
+- `cloud_region.py` - Cloud provider and region selection (AWS, GCP)
+
+### Storage & Persistence
+- `persistent_storage.py` - Using Modal volumes for data persistence
+- `network_file_system.py` - NFS for shared storage across sandboxes
+- `ephemeral_volume_upload.py` - Upload local files to sandbox
+- `sandbox_snapshot.py` - Save and restore sandbox filesystem state
+- `session_resume.py` - Persist conversation state across runs
+
+### Security & Monitoring
+- `security_sandbox.py` - Network isolation with CIDR allowlist
+- `hooks_security.py` - Security audit logging and tool monitoring
+- `hooks_monitoring.py` - Observing agent behavior and tool usage
+- `budget_control.py` - Cost tracking and budget limits
+
+### Advanced Features
+- `model_selection.py` - Choose Claude models (Haiku, Sonnet, Opus)
+- `extended_thinking.py` - Complex reasoning with visible thought process
+- `structured_output.py` - JSON responses with defined schemas
+- `multi_agent.py` - Define specialized sub-agents for delegation
+- `programmatic_subagents.py` - Custom agents with `AgentDefinition`
+
+### Integrations
+- `mcp_custom_tools.py` - Browser automation with Playwright MCP
+- `tunnel_web_app.py` - Build and expose web servers via encrypted tunnels
 
 ## Development
 

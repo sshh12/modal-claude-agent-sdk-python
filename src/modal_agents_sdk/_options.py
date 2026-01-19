@@ -71,6 +71,9 @@ class ModalAgentOptions:
     agents: dict[str, dict[str, Any]] | None = None
     """Custom agent definitions for multi-agent scenarios."""
 
+    resume: str | None = None
+    """Session ID to resume a previous conversation."""
+
     # === Modal Sandbox Options ===
 
     image: ModalAgentImage | None = None
@@ -114,6 +117,9 @@ class ModalAgentOptions:
 
     region: str | list[str] | None = None
     """Region(s) to run in."""
+
+    encrypted_ports: list[int] | None = None
+    """List of ports to expose via encrypted HTTPS tunnels."""
 
     name: str | None = None
     """Optional name for the sandbox."""

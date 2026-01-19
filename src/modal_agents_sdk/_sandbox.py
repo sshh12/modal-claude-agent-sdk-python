@@ -171,8 +171,14 @@ class SandboxManager:
         if local_api_key:
             env_vars["ANTHROPIC_API_KEY"] = local_api_key
 
-        if env_vars:
+        # Encrypted ports for tunnel support
+        # Note: encrypted_ports is required for environment variables to work in Modal
+        if self.options.encrypted_ports:
+            kwargs["encrypted_ports"] = self.options.encrypted_ports
+        elif env_vars:
             kwargs["encrypted_ports"] = []  # Required for env to work
+
+        if env_vars:
             kwargs["environment"] = env_vars
 
         # Network restrictions
@@ -302,18 +308,28 @@ class SandboxManager:
             stdout_content = process.stdout.read()
             if self.options.verbose:
                 print(f"Stdout length: {len(stdout_content)} bytes", flush=True)
+                # Debug: show first 500 chars of raw stdout
+                preview = stdout_content[:500] if isinstance(stdout_content, str) else stdout_content[:500].decode("utf-8", errors="replace")
+                print(f"Stdout preview: {preview}", flush=True)
 
             # Parse and yield messages
             for line in stdout_content.split("\n"):
                 if isinstance(line, bytes):
                     line = line.decode("utf-8")
 
+                if self.options.verbose and line.strip():
+                    print(f"Processing line: {line[:100]}...", flush=True)
+
                 message = parse_stream_message(line)
                 if message is not None:
                     yield message
 
+            # Always show stderr in verbose mode
+            stderr_content = process.stderr.read()
+            if self.options.verbose and stderr_content:
+                print(f"Stderr: {stderr_content[:2000]}", flush=True)
+
             if exit_code != 0:
-                stderr_content = process.stderr.read()
                 raise AgentExecutionError(
                     f"Agent execution failed with exit code {exit_code}: {stderr_content}",
                     exit_code=exit_code,
@@ -333,6 +349,29 @@ class SandboxManager:
                 pass  # Ignore errors during cleanup
             finally:
                 self._sandbox = None
+
+    def tunnels(self) -> dict[int, Any]:
+        """Get tunnel URLs for exposed ports.
+
+        Returns:
+            Dictionary mapping port numbers to Tunnel objects.
+            Each Tunnel has a .url attribute with the HTTPS tunnel URL.
+
+        Raises:
+            RuntimeError: If sandbox has not been created.
+        """
+        if self._sandbox is None:
+            raise RuntimeError("Sandbox not created. Call create_sandbox() first.")
+        return self._sandbox.tunnels()
+
+    @property
+    def sandbox(self) -> modal.Sandbox | None:
+        """Get the underlying Modal sandbox object.
+
+        Returns:
+            The Modal sandbox or None if not created.
+        """
+        return self._sandbox
 
     async def commit_volumes(self) -> None:
         """Commit any changes to mounted volumes."""

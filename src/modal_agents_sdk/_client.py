@@ -194,6 +194,29 @@ class ModalAgentClient:
         """
         return self._session_id
 
+    def tunnels(self) -> dict[int, Any]:
+        """Get tunnel URLs for exposed ports.
+
+        The sandbox must have been created with encrypted_ports option.
+
+        Returns:
+            Dictionary mapping port numbers to Tunnel objects.
+            Each Tunnel has a .url attribute with the HTTPS tunnel URL.
+
+        Raises:
+            RuntimeError: If not connected.
+
+        Example:
+            >>> options = ModalAgentOptions(encrypted_ports=[5000])
+            >>> async with ModalAgentClient(options=options) as client:
+            ...     tunnels = client.tunnels()
+            ...     if 5000 in tunnels:
+            ...         print(f"Tunnel URL: {tunnels[5000].url}")
+        """
+        if not self._is_connected:
+            raise RuntimeError("Not connected. Call connect() first.")
+        return self._manager.tunnels()
+
     async def __aenter__(self) -> ModalAgentClient:
         """Enter async context manager."""
         await self.connect()
