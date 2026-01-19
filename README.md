@@ -18,6 +18,8 @@ This package wraps the Claude Agent SDK to execute AI agents in secure, scalable
 | Auto-scaling | ✅ Built-in | ❌ |
 | Built-in tools | ✅ Read, Write, Bash, etc. | ✅ |
 | MCP servers | ✅ | ✅ |
+| Host-side hooks | ✅ Intercept tool calls | ❌ |
+| Host-side tools | ✅ Run on local machine | ❌ |
 | Multi-turn conversations | ✅ | ✅ |
 
 ## Installation
@@ -198,6 +200,68 @@ options = ModalAgentOptions(
 )
 ```
 
+## Host-Side Hooks
+
+Intercept and control tool calls from your local machine while the agent runs in the sandbox:
+
+```python
+from modal_agents_sdk import (
+    ModalAgentHooks,
+    PreToolUseHookInput,
+    PreToolUseHookResult,
+    ModalAgentOptions,
+)
+
+async def block_dangerous_commands(input: PreToolUseHookInput) -> PreToolUseHookResult:
+    """Block dangerous bash commands before execution."""
+    if input.tool_name == "Bash" and "rm -rf" in input.tool_input.get("command", ""):
+        return PreToolUseHookResult(
+            decision="deny",
+            reason="Blocked dangerous command",
+        )
+    return PreToolUseHookResult(decision="allow")
+
+hooks = ModalAgentHooks(
+    pre_tool_use=[block_dangerous_commands],
+    tool_filter="Bash|Write|Edit",  # Only intercept these tools
+)
+
+options = ModalAgentOptions(
+    host_hooks=hooks,
+    secrets=[modal.Secret.from_name("anthropic-key")],
+)
+```
+
+## Host-Side Tools
+
+Define custom tools that run on your local machine but can be called by the agent in the sandbox:
+
+```python
+from modal_agents_sdk import host_tool, HostToolServer, ModalAgentOptions
+import os
+
+@host_tool(
+    name="get_secret",
+    description="Retrieve a secret from local environment",
+    input_schema={"key": str},
+)
+async def get_secret(args):
+    """Access local environment variables not available in sandbox."""
+    value = os.environ.get(args["key"], "")
+    return {"content": [{"type": "text", "text": f"Secret value: {value}"}]}
+
+server = HostToolServer(name="local-tools", tools=[get_secret])
+
+options = ModalAgentOptions(
+    host_tools=[server],
+    secrets=[modal.Secret.from_name("anthropic-key")],
+)
+
+# Agent can now call get_secret to access your local environment
+async for message in query("Get the DATABASE_URL secret", options=options):
+    print(message)
+```
+
 ## Types
 
 See `src/modal_agents_sdk/_types.py` for complete type definitions. Key types are re-exported from `claude-agent-sdk`:
@@ -250,8 +314,7 @@ See the `examples/` directory for complete working examples:
 
 ### Security & Monitoring
 - `security_sandbox.py` - Network isolation with CIDR allowlist
-- `hooks_security.py` - Security audit logging and tool monitoring
-- `hooks_monitoring.py` - Observing agent behavior and tool usage
+- `hooks.py` - Host-side hooks for security, monitoring, and tool interception
 - `budget_control.py` - Cost tracking and budget limits
 
 ### Advanced Features
@@ -260,9 +323,9 @@ See the `examples/` directory for complete working examples:
 - `structured_output.py` - JSON responses with defined schemas
 - `multi_agent.py` - Define specialized sub-agents for delegation
 - `programmatic_subagents.py` - Custom agents with `AgentDefinition`
+- `host_tools.py` - Custom tools that run on host machine
 
 ### Integrations
-- `mcp_custom_tools.py` - Browser automation with Playwright MCP
 - `tunnel_web_app.py` - Build and expose web servers via encrypted tunnels
 
 ## Development

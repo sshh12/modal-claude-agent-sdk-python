@@ -14,6 +14,8 @@ from ._constants import (
 )
 
 if TYPE_CHECKING:
+    from ._host_hooks import ModalAgentHooks
+    from ._host_tools import HostToolServer
     from ._image import ModalAgentImage
 
 
@@ -57,7 +59,43 @@ class ModalAgentOptions:
     """Optional callback to validate tool usage. Returns True if tool use is allowed."""
 
     hooks: dict[str, list[dict[str, Any]]] | None = None
-    """Hooks for observability and custom behavior."""
+    """Hooks for observability and custom behavior (runs inside sandbox)."""
+
+    host_hooks: ModalAgentHooks | None = None
+    """Host-side hooks for intercepting tool calls from the host machine.
+
+    Unlike `hooks`, these callbacks run on your local machine while the agent
+    runs in the Modal sandbox. This enables true PreToolUse interception
+    (blocking/modifying tool calls) rather than just observation.
+
+    Example:
+        >>> from modal_agents_sdk import ModalAgentHooks, PreToolUseHookInput, PreToolUseHookResult
+        >>> async def block_dangerous(input: PreToolUseHookInput) -> PreToolUseHookResult:
+        ...     if "rm -rf" in input.tool_input.get("command", ""):
+        ...         return PreToolUseHookResult(decision="deny", reason="Blocked")
+        ...     return PreToolUseHookResult(decision="allow")
+        ...
+        >>> hooks = ModalAgentHooks(pre_tool_use=[block_dangerous])
+        >>> options = ModalAgentOptions(host_hooks=hooks)
+    """
+
+    host_tools: list[HostToolServer] | None = None
+    """Host-side tool servers that execute on the host machine.
+
+    Host tools allow defining custom tools that run on your local machine
+    but can be called by the Claude agent running inside the Modal sandbox.
+    This is useful for accessing local resources like environment variables,
+    local databases, or file systems.
+
+    Example:
+        >>> from modal_agents_sdk import host_tool, HostToolServer
+        >>> @host_tool("get_secret", "Get secret from env", {"key": str})
+        ... async def get_secret(args):
+        ...     return {"content": [{"type": "text", "text": os.environ.get(args["key"], "")}]}
+        ...
+        >>> server = HostToolServer(name="local-tools", tools=[get_secret])
+        >>> options = ModalAgentOptions(host_tools=[server])
+    """
 
     cwd: str | Path = DEFAULT_CWD
     """Working directory for the agent. Defaults to '/workspace'."""

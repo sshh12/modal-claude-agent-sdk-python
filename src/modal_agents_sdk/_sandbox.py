@@ -20,10 +20,14 @@ from ._errors import (
     SandboxTerminatedError,
     SandboxTimeoutError,
 )
+from ._host_hooks import HookDispatcher, is_agent_message, is_hook_request, parse_hook_message
+from ._host_tools import HostToolDispatcher, is_host_tool_request
 from ._image import ModalAgentImage
 from ._utils import build_sdk_options, parse_stream_message
 
 if TYPE_CHECKING:
+    from ._host_hooks import ModalAgentHooks
+    from ._host_tools import HostToolServer
     from ._options import ModalAgentOptions
 
 
@@ -239,6 +243,7 @@ class SandboxManager:
         self,
         prompt: str,
         resume: str | None = None,
+        host_hooks: ModalAgentHooks | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """Execute the Claude agent in the sandbox using the Python SDK.
 
@@ -248,6 +253,7 @@ class SandboxManager:
         Args:
             prompt: The prompt to send to the agent.
             resume: Optional session ID to resume a previous conversation.
+            host_hooks: Optional hooks configuration for host-side interception.
 
         Yields:
             Parsed message dictionaries from the agent.
@@ -258,6 +264,19 @@ class SandboxManager:
             SandboxTimeoutError: If execution times out.
             SandboxTerminatedError: If sandbox is terminated unexpectedly.
         """
+        # Check if host_hooks or host_tools are configured
+        hooks_config = host_hooks or getattr(self.options, "host_hooks", None)
+        host_tools_config = getattr(self.options, "host_tools", None)
+
+        if hooks_config is not None or host_tools_config is not None:
+            # Use streaming mode with hook/tool interception
+            async for message in self._execute_with_host_features(
+                prompt, resume, hooks_config, host_tools_config
+            ):
+                yield message
+            return
+
+        # Standard execution without hooks
         if self._sandbox is None:
             await self.create_sandbox()
             assert self._sandbox is not None
@@ -316,11 +335,192 @@ class SandboxManager:
                 if self.options.verbose and line.strip():
                     print(f"Processing line: {line[:100]}...", flush=True)
 
-                message = parse_stream_message(line)
-                if message is not None:
-                    yield message
+                parsed_msg = parse_stream_message(line)
+                if parsed_msg is not None:
+                    # Strip the _type wrapper if present (from emit_agent_message)
+                    if parsed_msg.get("_type") == "message":
+                        parsed_msg = {k: v for k, v in parsed_msg.items() if k != "_type"}
+                    yield parsed_msg
 
             # Always show stderr in verbose mode
+            stderr_content = process.stderr.read()
+            if self.options.verbose and stderr_content:
+                print(f"Stderr: {stderr_content[:2000]}", flush=True)
+
+            if exit_code != 0:
+                raise AgentExecutionError(
+                    f"Agent execution failed with exit code {exit_code}: {stderr_content}",
+                    exit_code=exit_code,
+                )
+
+        except TimeoutError as e:
+            raise SandboxTimeoutError(f"Sandbox execution timed out: {e}") from e
+        except modal.exception.SandboxTerminatedError as e:
+            raise SandboxTerminatedError(f"Sandbox was terminated: {e}") from e
+
+    async def _execute_with_host_features(
+        self,
+        prompt: str,
+        resume: str | None,
+        hooks: ModalAgentHooks | None,
+        host_tools: list[HostToolServer] | None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Execute agent with bidirectional hook and tool interception.
+
+        This method uses streaming stdout/stdin communication to allow
+        host-side hooks to intercept tool calls and host-side tools to
+        be executed on the host machine.
+
+        Args:
+            prompt: The prompt to send to the agent.
+            resume: Optional session ID to resume.
+            hooks: Optional hook configuration with callbacks.
+            host_tools: Optional list of host-side tool servers.
+
+        Yields:
+            Parsed message dictionaries from the agent.
+        """
+        if self._sandbox is None:
+            await self.create_sandbox()
+            assert self._sandbox is not None
+
+        # Build SDK options as JSON
+        sdk_options = build_sdk_options(self.options, resume=resume)
+
+        # Add MCP tool names to allowed_tools for host tools
+        if host_tools:
+            allowed_tools = list(sdk_options.get("allowed_tools", []))
+            for server in host_tools:
+                for tool in server.tools:
+                    # MCP tools are named with pattern: mcp__{server_name}__{tool_name}
+                    mcp_tool_name = f"mcp__{server.name}__{tool.name}"
+                    if mcp_tool_name not in allowed_tools:
+                        allowed_tools.append(mcp_tool_name)
+            sdk_options["allowed_tools"] = allowed_tools
+
+            # Include host tools config in the options JSON
+            sdk_options["_host_tools"] = [
+                {
+                    "name": server.name,
+                    "version": server.version,
+                    "tools": server.get_tool_definitions(),
+                }
+                for server in host_tools
+            ]
+
+        # Include hooks flag in options
+        if hooks:
+            sdk_options["_enable_hooks"] = True
+
+        options_json = json.dumps(sdk_options)
+
+        # Command to execute the runner script
+        full_command = [
+            "python",
+            "-c",
+            RUNNER_SCRIPT,
+            options_json,
+            prompt,
+        ]
+
+        if self.options.verbose:
+            print(f"Executing with host features, options: {sdk_options}", flush=True)
+            print(f"Prompt: {prompt}", flush=True)
+            if host_tools:
+                print(f"Host tools: {[s.name for s in host_tools]}", flush=True)
+
+        # Create dispatchers
+        hook_dispatcher = HookDispatcher(hooks) if hooks else None
+        tool_dispatcher = HostToolDispatcher(host_tools) if host_tools else None
+
+        try:
+            if self.options.verbose:
+                print("Starting exec with host features...", flush=True)
+
+            # Start the process (don't wait for completion - we stream)
+            process = await self._sandbox.exec.aio(*full_command)
+
+            if self.options.verbose:
+                print("Exec started, streaming output...", flush=True)
+
+            # Stream stdout line by line and handle hooks/tools
+            async for line in process.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+
+                if self.options.verbose:
+                    print(f"Received line: {line[:100]}...", flush=True)
+
+                # Parse the message
+                message = parse_hook_message(line)
+                if message is None:
+                    continue
+
+                if is_hook_request(message) and hook_dispatcher:
+                    # Handle hook request
+                    hook_event = message.get("hook_event", "")
+
+                    if hook_event == "PreToolUse":
+                        # Dispatch to pre-tool-use hooks and send response
+                        response = await hook_dispatcher.dispatch_pre_tool_use(message)
+                        response_json = json.dumps(response) + "\n"
+
+                        if self.options.verbose:
+                            print(f"Sending hook response: {response_json.strip()}", flush=True)
+
+                        # Write response to process stdin
+                        process.stdin.write(response_json.encode())
+                        await process.stdin.drain.aio()
+
+                    elif hook_event == "PostToolUse":
+                        # Fire-and-forget post-tool-use hooks
+                        await hook_dispatcher.dispatch_post_tool_use(message)
+
+                elif is_host_tool_request(message) and tool_dispatcher:
+                    # Handle host tool request
+                    if self.options.verbose:
+                        tool_name = message.get("tool_name", "")
+                        server_name = message.get("server_name", "")
+                        print(f"Dispatching host tool: {server_name}:{tool_name}", flush=True)
+
+                    response = await tool_dispatcher.dispatch(message)
+                    response_json = json.dumps(response) + "\n"
+
+                    if self.options.verbose:
+                        is_error = response.get("is_error", False)
+                        print(f"Sending tool response (error={is_error})", flush=True)
+
+                    # Write response to process stdin
+                    process.stdin.write(response_json.encode())
+                    await process.stdin.drain.aio()
+
+                elif is_agent_message(message):
+                    # Extract the actual message content (remove _type wrapper)
+                    if "_type" in message:
+                        # The actual message data is the rest of the dict
+                        actual_message = {k: v for k, v in message.items() if k != "_type"}
+                    else:
+                        actual_message = message
+                    yield actual_message
+
+            # Wait for process to complete
+            await process.wait.aio()
+            exit_code = process.returncode
+
+            if self.options.verbose:
+                print(f"Process completed with exit code: {exit_code}", flush=True)
+
+            if exit_code == 1:
+                # Check if it's a module not found error
+                stderr_content = process.stderr.read()
+                if "ModuleNotFoundError" in stderr_content:
+                    if "claude_agent_sdk" in stderr_content:
+                        raise CLINotInstalledError(
+                            "claude-agent-sdk package not found. Make sure 'claude-agent-sdk' "
+                            "is installed in the sandbox image."
+                        )
+
             stderr_content = process.stderr.read()
             if self.options.verbose and stderr_content:
                 print(f"Stderr: {stderr_content[:2000]}", flush=True)

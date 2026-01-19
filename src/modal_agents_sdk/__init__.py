@@ -35,6 +35,17 @@ from ._errors import (
     SandboxTimeoutError,
     VolumeError,
 )
+from ._host_hooks import (
+    ModalAgentHooks,
+    PostToolUseHookInput,
+    PreToolUseHookInput,
+    PreToolUseHookResult,
+)
+from ._host_tools import (
+    HostTool,
+    HostToolServer,
+    host_tool,
+)
 from ._image import ModalAgentImage
 from ._options import ModalAgentOptions
 from ._query import query
@@ -61,6 +72,15 @@ __all__ = [
     "ModalAgentClient",
     "ModalAgentOptions",
     "ModalAgentImage",
+    # Hooks
+    "ModalAgentHooks",
+    "PreToolUseHookInput",
+    "PreToolUseHookResult",
+    "PostToolUseHookInput",
+    # Host Tools
+    "host_tool",
+    "HostTool",
+    "HostToolServer",
     # Errors
     "ModalAgentError",
     "SandboxCreationError",
